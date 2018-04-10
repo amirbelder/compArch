@@ -34,20 +34,56 @@ int SIM_CoreReset(void) {
 
 void DoIDStage() {
     state.pipeStageState[STAGE_ID].src1Val = state.regFile[state.pipeStageState[STAGE_ID].cmd.src1];
-    if (state.pipeStageState[STAGE_IF].cmd.isSrc2Imm) {
-      state.pipeStageState[STAGE_ID].src2Val = state.pipeStageState[STAGE_IF].cmd.src2;
+    if (state.pipeStageState[STAGE_ID].cmd.isSrc2Imm) {
+      state.pipeStageState[STAGE_ID].src2Val = state.pipeStageState[STAGE_ID].cmd.src2;
     }
     else {
       state.pipeStageState[STAGE_ID].src2Val = state.regFile[state.pipeStageState[STAGE_ID].cmd.src2];
     }
 }
 
-void DoWBStage() {
-  if (state.pipeStageState[STAGE_WB].cmd.opcode > CMD_NOP && state.pipeStageState[STAGE_WB].cmd.opcode <= CMD_SUBI) {
-    state.regFile[state.pipeStageState[STAGE_WB].cmd.dst] = state.pipeStageState[STAGE_WB].src1Val;
+void DoEXStage() {
+  PipeStageState* current_stage = &state.pipeStageState[STAGE_EX];
+  switch(current_stage->cmd.opcode) {
+    case CMD_ADD:
+      current_stage->src1Val = current_stage->src1Val + current_stage->src2Val;
+      break;
+    case CMD_ADDI:
+      current_stage->src1Val = current_stage->src1Val + current_stage->src2Val;
+      break;
+    case CMD_SUB:
+      current_stage->src1Val = current_stage->src1Val - current_stage->src2Val;
+      break;
+    case CMD_SUBI:
+      current_stage->src1Val = current_stage->src1Val - current_stage->src2Val;
+      break;
   }
-  else {
-    state.regFile[state.pipeStageState[STAGE_WB].cmd.dst] = state.pipeStageState[STAGE_WB].src2Val;
+}
+
+void DoWBStage() {
+  PipeStageState* current_stage = &state.pipeStageState[STAGE_WB];
+
+  if (state.pipeStageState[STAGE_WB].cmd.dst == 0) return;
+  
+  if (CMD_NOP < current_stage->cmd.opcode && CMD_SUBI >= current_stage->cmd.opcode) {
+    state.regFile[current_stage->cmd.dst] = current_stage->src1Val;
+  }
+  
+  else if (CMD_LOAD == current_stage->cmd.opcode) {
+    state.regFile[current_stage->cmd.dst] = current_stage->src2Val;
+
+    if (forwarding) {
+      PipeStageState* ex_stage = &state.pipeStageState[STAGE_EX];
+
+      if (ex_stage->cmd.src1 == current_stage->cmd.dst) {
+        ex_stage->src1Val = state.regFile[current_stage->cmd.dst];
+      }
+      if (ex_stage->cmd.src2 == current_stage->cmd.dst &&
+          !ex_stage->cmd.isSrc2Imm) {
+        ex_stage->src2Val = state.regFile[current_stage->cmd.dst];
+      }
+    }
+    
   }
 }
 
@@ -59,8 +95,9 @@ void SIM_CoreClkTick() {
   state.pc += 4;
   
   DoWBStage();
-  DoIDStage();
   /* TODO Continue Execute Stages */
+  DoEXStage();
+  DoIDStage();
 
   
   if (forwarding) {
