@@ -3,6 +3,17 @@
 
 #include "sim_api.h"
 
+SIM_coreState state;
+
+#define STAGE_IF    0
+#define STAGE_ID    1
+#define STAGE_EX    2
+#define STAGE_MEM   3
+#define STAGE_WB    4
+
+void reset_cmd(SIM_cmd* cmd) {
+  memset(cmd, 0, sizeof(SIM_cmd));
+}
 
 /*! SIM_CoreReset: Reset the processor core simulator machine to start new simulation
   Use this API to initialize the processor core simulator's data structures.
@@ -13,13 +24,76 @@
   \returns 0 on success. <0 in case of initialization failure.
 */
 int SIM_CoreReset(void) {
+  state.pc = 0;
+  for (int i = 0; i <= SIM_REGFILE_SIZE; i ++)
+    state.regFile[i] = 0;
+  memset(&state, 0, sizeof(SIM_coreState));
+  SIM_MemInstRead(state.pc, &state.pipeStageState[STAGE_IF].cmd);
+  return 0;
+}
+
+void DoIDStage() {
+    state.pipeStageState[STAGE_ID].src1Val = state.regFile[state.pipeStageState[STAGE_ID].cmd.src1];
+    if (state.pipeStageState[STAGE_IF].cmd.isSrc2Imm) {
+      state.pipeStageState[STAGE_ID].src2Val = state.pipeStageState[STAGE_IF].cmd.src2;
+    }
+    else {
+      state.pipeStageState[STAGE_ID].src2Val = state.regFile[state.pipeStageState[STAGE_ID].cmd.src2];
+    }
+}
+
+void DoWBStage() {
+  if (state.pipeStageState[STAGE_WB].cmd.opcode > CMD_NOP && state.pipeStageState[STAGE_WB].cmd.opcode <= CMD_SUBI) {
+    state.regFile[state.pipeStageState[STAGE_WB].cmd.dst] = state.pipeStageState[STAGE_WB].src1Val;
+  }
+  else {
+    state.regFile[state.pipeStageState[STAGE_WB].cmd.dst] = state.pipeStageState[STAGE_WB].src2Val;
+  }
 }
 
 /*! SIM_CoreClkTick: Update the core simulator's state given one clock cycle.
   This function is expected to update the core pipeline given a clock cycle event.
 */
 void SIM_CoreClkTick() {
+  
+  state.pc += 4;
+  
+  DoWBStage();
+  DoIDStage();
+  /* TODO Continue Execute Stages */
 
+  
+  if (forwarding) {
+    
+  }
+  else if (split_regfile) {
+    
+  }
+
+  else { //Only Stalling
+    for (int i = STAGE_WB; i > STAGE_IF; i--) { 
+      state.pipeStageState[i] = state.pipeStageState[i-1];
+    }
+    bool data_hazard_detected = false;
+    for (int i = STAGE_ID; i < SIM_PIPELINE_DEPTH; i ++){ 
+      if (state.pipeStageState[i].cmd.opcode > CMD_NOP && state.pipeStageState[i].cmd.opcode <= CMD_LOAD) {
+        int stage_dest = state.pipeStageState[i].cmd.dst;
+        if (state.pipeStageState[STAGE_IF].cmd.src1 == stage_dest ||
+            (!state.pipeStageState[STAGE_IF].cmd.isSrc2Imm) 
+              && state.pipeStageState[STAGE_IF].cmd.src2 == stage_dest) {
+              data_hazard_detected = true;
+              break;         
+        }
+      }
+    }
+    if (data_hazard_detected) {
+      reset_cmd(&state.pipeStageState[STAGE_ID].cmd); 
+    }
+    else {
+      state.pipeStageState[STAGE_ID] = state.pipeStageState[STAGE_IF]; 
+      SIM_MemInstRead(state.pc, &state.pipeStageState[STAGE_IF].cmd);
+    }
+  }
 }
 
 /*! SIM_CoreGetState: Return the current core (pipeline) internal state
@@ -27,5 +101,6 @@ void SIM_CoreClkTick() {
     The function will return the state of the pipe at the end of a cycle
 */
 void SIM_CoreGetState(SIM_coreState *curState) {
+  memcpy(curState, &state, sizeof(SIM_coreState));
 }
 
