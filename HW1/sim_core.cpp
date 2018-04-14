@@ -130,8 +130,6 @@ void SIM_CoreClkTick() {
     return; //Please notice the function returns
   }
 
-  state.pc += 4;
-
   if (forwarding) {
     
   }
@@ -140,10 +138,6 @@ void SIM_CoreClkTick() {
   }
 
   else { //Only Stalling
-    for (int i = STAGE_WB; i >= STAGE_EX; i--) { 
-      state.pipeStageState[i] = state.pipeStageState[i-1];
-      stage_dest_val[i] = stage_dest_val[i-1];
-    }
     bool data_hazard_detected = false;
     for (int i = STAGE_EX; i < SIM_PIPELINE_DEPTH; i ++){ 
       if (state.pipeStageState[i].cmd.opcode > CMD_NOP && state.pipeStageState[i].cmd.opcode <= CMD_LOAD) {
@@ -156,12 +150,17 @@ void SIM_CoreClkTick() {
         }
       }
     }
+    for (int i = STAGE_WB; i >= STAGE_EX; i--) { 
+      state.pipeStageState[i] = state.pipeStageState[i-1];
+      stage_dest_val[i] = stage_dest_val[i-1];
+    }
     if (data_hazard_detected) {
       reset_stage(STAGE_EX);
     }
     else {
       state.pipeStageState[STAGE_ID] = state.pipeStageState[STAGE_IF];
       stage_dest_val[STAGE_ID] = 0;
+      state.pc += 4;
       SIM_MemInstRead(state.pc, &state.pipeStageState[STAGE_IF].cmd);
       stage_dest_val[STAGE_IF] = 0;
     }
