@@ -49,7 +49,10 @@ void DoIDStage() {
     current_stage->src2Val = state.regFile[current_stage->cmd.src2];
   }
   
-  if (current_stage->cmd.opcode == CMD_STORE) {
+  if (current_stage->cmd.opcode == CMD_STORE ||
+      current_stage->cmd.opcode == CMD_BR ||
+      current_stage->cmd.opcode == CMD_BREQ ||
+      current_stage->cmd.opcode == CMD_BRNEQ) {
     stage_dest_val[STAGE_ID] = state.regFile[current_stage->cmd.dst];
   }
 }
@@ -74,7 +77,7 @@ void DoEXStage() {
   }
 }
 void DoMemStage() {
-// TODO: ADD BREQ, BNEQ
+// TODO: ADD BREQ, BNEQ, BR
 // TODO: Implement Forwarding to EX
   PipeStageState* current_stage = &state.pipeStageState[STAGE_MEM];
   switch(current_stage->cmd.opcode) {
@@ -121,7 +124,7 @@ void DoWBStage() {
   This function is expected to update the core pipeline given a clock cycle event.
 */
 void SIM_CoreClkTick() {
-    
+  DoWBStage();
   DoMemStage();
   DoEXStage();
   DoIDStage();
@@ -143,11 +146,19 @@ void SIM_CoreClkTick() {
       last_stage_cannot_forward = STAGE_MEM;
     }
     for (int i = STAGE_EX; i <= last_stage_cannot_forward; i ++){ 
-      if (state.pipeStageState[i].cmd.opcode > CMD_NOP && state.pipeStageState[i].cmd.opcode <= CMD_LOAD) {
+      if (state.pipeStageState[i].cmd.opcode > CMD_NOP && state.pipeStageState[i].cmd.opcode <= CMD_LOAD) { //command that changes regfile
         int stage_dest = state.pipeStageState[i].cmd.dst;
         if (state.pipeStageState[STAGE_ID].cmd.src1 == stage_dest ||
+
             (!state.pipeStageState[STAGE_ID].cmd.isSrc2Imm 
-              && state.pipeStageState[STAGE_ID].cmd.src2 == stage_dest)) {
+              && state.pipeStageState[STAGE_ID].cmd.src2 == stage_dest) ||
+
+              (state.pipeStageState[STAGE_ID].cmd.dst == stage_dest && //Some commands need to read dst register at Decode stage
+                (state.pipeStageState[STAGE_ID].cmd.opcode == CMD_STORE ||
+                 state.pipeStageState[STAGE_ID].cmd.opcode == CMD_BREQ ||
+                 state.pipeStageState[STAGE_ID].cmd.opcode == CMD_BR ||
+                 state.pipeStageState[STAGE_ID].cmd.opcode == CMD_BRNEQ)
+              )) {
               data_hazard_detected = true;
               break;         
         }
