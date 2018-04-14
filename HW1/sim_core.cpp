@@ -18,6 +18,10 @@ void reset_stage(uint32_t stage) {
   stage_dest_val[stage] = 0;
 }
 
+void fetch_instruction() {
+  SIM_MemInstRead(state.pc, &state.pipeStageState[STAGE_IF].cmd);
+}
+
 /*! SIM_CoreReset: Reset the processor core simulator machine to start new simulation
   Use this API to initialize the processor core simulator's data structures.
   The simulator machine must complete this call with these requirements met:
@@ -27,12 +31,10 @@ void reset_stage(uint32_t stage) {
   \returns 0 on success. <0 in case of initialization failure.
 */
 int SIM_CoreReset(void) {
-  state.pc = 0;
-  for (int i = 0; i <= SIM_REGFILE_SIZE; i ++)
-    state.regFile[i] = 0;
-  memset(&state, 0, sizeof(SIM_coreState));
-  SIM_MemInstRead(state.pc, &state.pipeStageState[STAGE_IF].cmd);
   last_read_mem_failed = false;
+  memset(&state, 0, sizeof(SIM_coreState));
+  memset(&stage_dest_val, 0, SIM_PIPELINE_DEPTH * sizeof(int32_t));
+  fetch_instruction();
   return 0;
 }
 
@@ -71,8 +73,9 @@ void DoEXStage() {
       break;
   }
 }
-
 void DoMemStage() {
+// TODO: ADD BREQ, BNEQ
+// TODO: Implement Forwarding to EX
   PipeStageState* current_stage = &state.pipeStageState[STAGE_MEM];
   switch(current_stage->cmd.opcode) {
     case CMD_LOAD:
@@ -119,7 +122,6 @@ void DoWBStage() {
 */
 void SIM_CoreClkTick() {
     
-  DoWBStage();
   DoMemStage();
   DoEXStage();
   DoIDStage();
@@ -131,20 +133,21 @@ void SIM_CoreClkTick() {
   }
 
   if (forwarding) {
-    
-  }
-  else if (split_regfile) {
-    
+    //TODO: Implement pipe forwarding
   }
 
-  else { //Only Stalling
+  else { //Stalling & Split Regfile
     bool data_hazard_detected = false;
-    for (int i = STAGE_EX; i < SIM_PIPELINE_DEPTH; i ++){ 
+    int last_stage_cannot_forward = STAGE_WB;
+    if (split_regfile) {
+      last_stage_cannot_forward = STAGE_MEM;
+    }
+    for (int i = STAGE_EX; i <= last_stage_cannot_forward; i ++){ 
       if (state.pipeStageState[i].cmd.opcode > CMD_NOP && state.pipeStageState[i].cmd.opcode <= CMD_LOAD) {
         int stage_dest = state.pipeStageState[i].cmd.dst;
         if (state.pipeStageState[STAGE_ID].cmd.src1 == stage_dest ||
-            (!state.pipeStageState[STAGE_ID].cmd.isSrc2Imm) 
-              && state.pipeStageState[STAGE_ID].cmd.src2 == stage_dest) {
+            (!state.pipeStageState[STAGE_ID].cmd.isSrc2Imm 
+              && state.pipeStageState[STAGE_ID].cmd.src2 == stage_dest)) {
               data_hazard_detected = true;
               break;         
         }
@@ -159,11 +162,15 @@ void SIM_CoreClkTick() {
     }
     else {
       state.pipeStageState[STAGE_ID] = state.pipeStageState[STAGE_IF];
-      stage_dest_val[STAGE_ID] = 0;
+      stage_dest_val[STAGE_ID] = stage_dest_val[STAGE_IF];
+      
       state.pc += 4;
-      SIM_MemInstRead(state.pc, &state.pipeStageState[STAGE_IF].cmd);
+      fetch_instruction();
       stage_dest_val[STAGE_IF] = 0;
     }
+  }
+  if (split_regfile) {
+    DoWBStage();// For some reason the results expects ID stage to be done also here.
   }
   DoIDStage(); // For some reason the results expects ID stage to be done also here.
 }
