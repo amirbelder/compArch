@@ -7,11 +7,20 @@ SIM_coreState state;
 int32_t stage_dest_val[SIM_PIPELINE_DEPTH];
 bool last_read_mem_failed;
 
+int32_t store_cmd_temp_val;
+uint32_t store_cmd_temp_addr;
+bool last_cycle_store_cmd = false;;
+
+int32_t regfile_temp_val;
+uint32_t regfile_temp_idx;
+bool last_cycle_change_regfile = false;
+
 #define STAGE_IF    0
 #define STAGE_ID    1
 #define STAGE_EX    2
 #define STAGE_MEM   3
 #define STAGE_WB    4
+
 
 void reset_stage(uint32_t stage) {
   memset(&state.pipeStageState[stage], 0, sizeof(PipeStageState));
@@ -20,6 +29,20 @@ void reset_stage(uint32_t stage) {
 
 void fetch_instruction() {
   SIM_MemInstRead(state.pc, &state.pipeStageState[STAGE_IF].cmd);
+}
+
+void write_regfile() {
+  if (last_cycle_change_regfile) {
+    state.regFile[regfile_temp_idx] = regfile_temp_val;
+     last_cycle_change_regfile = false;
+  }
+}
+void write_last_cycle_vals() {
+  write_regfile();
+  if (last_cycle_store_cmd) {
+    SIM_MemDataWrite(store_cmd_temp_addr, store_cmd_temp_val);
+    last_cycle_store_cmd = false;
+  }
 }
 
 /*! SIM_CoreReset: Reset the processor core simulator machine to start new simulation
@@ -87,7 +110,9 @@ void DoMemStage() {
       }
       break;
     case CMD_STORE:
-      SIM_MemDataWrite(stage_dest_val[STAGE_MEM] + current_stage->src2Val, current_stage->src1Val);
+      store_cmd_temp_addr = stage_dest_val[STAGE_MEM] + current_stage->src2Val;
+      store_cmd_temp_val = current_stage->src1Val;
+      last_cycle_store_cmd = true;
       break;
     default:
       break;
@@ -99,13 +124,14 @@ void DoWBStage() {
 
   if (state.pipeStageState[STAGE_WB].cmd.dst == 0) return;
   
-  if (CMD_NOP < current_stage->cmd.opcode && CMD_SUBI >= current_stage->cmd.opcode) {
-    state.regFile[current_stage->cmd.dst] = stage_dest_val[STAGE_WB];
+  if (CMD_LOAD == current_stage->cmd.opcode || 
+      (CMD_NOP < current_stage->cmd.opcode && CMD_SUBI >= current_stage->cmd.opcode)) {
+    regfile_temp_idx = current_stage->cmd.dst;
+    regfile_temp_val = stage_dest_val[STAGE_WB];
+    last_cycle_change_regfile = true;
   }
   
-  else if (CMD_LOAD == current_stage->cmd.opcode) {
-    state.regFile[current_stage->cmd.dst] = stage_dest_val[STAGE_WB];
-
+  if (CMD_LOAD == current_stage->cmd.opcode) {
     if (forwarding) {
       PipeStageState* ex_stage = &state.pipeStageState[STAGE_EX];
 
@@ -124,22 +150,19 @@ void DoWBStage() {
   This function is expected to update the core pipeline given a clock cycle event.
 */
 void SIM_CoreClkTick() {
-  DoWBStage();
-  DoMemStage();
-  DoEXStage();
-  DoIDStage();
+
+  write_last_cycle_vals();
 
   if (last_read_mem_failed) {
     reset_stage(STAGE_WB);
     last_read_mem_failed = false;
-    return; //Please notice the function returns
   }
 
-  if (forwarding) {
+  else if (forwarding) {
     //TODO: Implement pipe forwarding
   }
 
-  else { //Stalling & Split Regfile
+  else { //MEM Didn't fail & Stalling or Split Regfile 
     bool data_hazard_detected = false;
     int last_stage_cannot_forward = STAGE_WB;
     if (split_regfile) {
@@ -180,10 +203,13 @@ void SIM_CoreClkTick() {
       stage_dest_val[STAGE_IF] = 0;
     }
   }
+  DoWBStage();
   if (split_regfile) {
-    DoWBStage();// For some reason the results expects ID stage to be done also here.
+   write_regfile();
   }
-  DoIDStage(); // For some reason the results expects ID stage to be done also here.
+  DoMemStage();
+  DoEXStage();
+  DoIDStage();
 }
 
 /*! SIM_CoreGetState: Return the current core (pipeline) internal state
