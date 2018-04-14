@@ -29,6 +29,7 @@ void reset_stage(uint32_t stage) {
 
 void fetch_instruction() {
   SIM_MemInstRead(state.pc, &state.pipeStageState[STAGE_IF].cmd);
+  stage_dest_val[STAGE_IF] = 0;
 }
 
 void write_regfile() {
@@ -197,12 +198,11 @@ void SIM_CoreClkTick() {
     else {
       state.pipeStageState[STAGE_ID] = state.pipeStageState[STAGE_IF];
       stage_dest_val[STAGE_ID] = stage_dest_val[STAGE_IF];
-      
       state.pc += 4;
-      fetch_instruction();
-      stage_dest_val[STAGE_IF] = 0;
     }
   }
+
+  
   DoWBStage();
   if (split_regfile) {
    write_regfile();
@@ -210,6 +210,7 @@ void SIM_CoreClkTick() {
   DoMemStage();
   DoEXStage();
   DoIDStage();
+  fetch_instruction();
 }
 
 /*! SIM_CoreGetState: Return the current core (pipeline) internal state
